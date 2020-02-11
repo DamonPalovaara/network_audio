@@ -51,18 +51,18 @@ impl Server {
     pub fn fill_buffer(&mut self, jack_buf: &[f32], channel_idx: usize) {
 
         // Convert jack buffer into bytes
-        let jack_buf_u8 = jack_buf_to_bytes(&jack_buf);        
-        let header = self.generate_header(channel_idx);
+        let jack_buf_u8 = jack_buf_to_bytes(&jack_buf);
 
         // Turn the buffers into chunk iterators
-        let udp_chunks  = self.buffers[channel_idx][..].chunks_mut(self.udp_payload_size);
-        let mut jack_chunks = jack_buf_u8.chunks(self.udp_payload_size - 4);        
+        let headers: Vec<[u8; 4]> = (0..self.num_bufs).map(|_| self.generate_header(channel_idx)).collect();
+        let mut udp_chunks        = self.buffers[channel_idx][..].chunks_mut(self.udp_payload_size);
+        let mut jack_chunks       = jack_buf_u8.chunks(self.udp_payload_size - 4);
 
-        // Copy jack buffer into server buffers
-        udp_chunks.for_each(|udp_chunk| {            
-            udp_chunk[..4].copy_from_slice(&header);
+        for i in 0..self.num_bufs {
+            let udp_chunk = udp_chunks.next().unwrap();
+            udp_chunk[..4].copy_from_slice(&headers[i]);
             udp_chunk[4..].copy_from_slice(jack_chunks.next().unwrap());
-        });
+        }
     }
 
     // Try to make this function async so Jack can update while this is sending
@@ -85,10 +85,16 @@ impl Server {
         [channel_num, encoded_idx, sample_rate, num_chunks]
     }
 
+    #[cfg(test)]
+    pub fn _read_buffer(&self, channel_idx: usize) -> &[u8] {
+        &self.buffers[channel_idx]
+    }
+
 }
 
+// Channel_number | Encoded index | Sample rate | number of chunks
 struct Client {
-    channel_number: usize, // Channel_number | Encoded index | Sample rate | number of chunks
+    channel_number: usize, 
     encoded_index:  usize,
     sample_rate:    usize,
     num_chunks:     usize,
@@ -178,34 +184,50 @@ mod tests {
         );
 
         // Fill buffers
-        let one = f32::from_be_bytes([1, 1, 1, 1]);
-        let jack_buffer = vec![one; jack_buf_size];
+        let nines = f32::from_be_bytes([9, 9, 9, 9]);
+        let jack_buffer = vec![nines; jack_buf_size];
         server.fill_buffer(&jack_buffer, 0); 
         server.fill_buffer(&jack_buffer, 1);
 
-        // Test channel 0               
-        assert_eq!(0, server.buffers[0][0]);
-        assert_eq!(0, server.buffers[0][3]);
-        assert_eq!(1, server.buffers[0][4]);
-        assert_eq!(1, server.buffers[0][1369]);
-        assert_eq!(0, server.buffers[0][1370]);
-        assert_eq!(1, server.buffers[0][1374]);
-        assert_eq!(1, server.buffers[0][2739]);
-        assert_eq!(0, server.buffers[0][2740]);
-        assert_eq!(1, server.buffers[0][2744]);
-        assert_eq!(1, server.buffers[0][4107]);
+        // Test channel 0                 
+        assert_eq!(0, server._read_buffer(0)[0   ]); // 1st header 
+        assert_eq!(0, server._read_buffer(0)[1   ]);
+        assert_eq!(0, server._read_buffer(0)[2   ]);
+        assert_eq!(3, server._read_buffer(0)[3   ]);        
+        assert_eq!(9, server._read_buffer(0)[4   ]); // 1st payload 
+        assert_eq!(9, server._read_buffer(0)[1369]);       
+        assert_eq!(0, server._read_buffer(0)[1370]); // 2nd header 
+        assert_eq!(1, server._read_buffer(0)[1371]);
+        assert_eq!(0, server._read_buffer(0)[1372]);
+        assert_eq!(3, server._read_buffer(0)[1373]);        
+        assert_eq!(9, server._read_buffer(0)[1374]); // 2nd payload
+        assert_eq!(9, server._read_buffer(0)[2739]);        
+        assert_eq!(0, server._read_buffer(0)[2740]); // 3rd header
+        assert_eq!(2, server._read_buffer(0)[2741]);
+        assert_eq!(0, server._read_buffer(0)[2742]);
+        assert_eq!(3, server._read_buffer(0)[2743]);        
+        assert_eq!(9, server._read_buffer(0)[2744]); // 3rd payload
+        assert_eq!(9, server._read_buffer(0)[4107]);
 
-        // Test channel 1        
-        assert_eq!(0, server.buffers[1][0]);
-        assert_eq!(0, server.buffers[1][3]);
-        assert_eq!(1, server.buffers[1][4]);
-        assert_eq!(1, server.buffers[1][1369]);
-        assert_eq!(0, server.buffers[1][1370]);
-        assert_eq!(1, server.buffers[1][1374]);
-        assert_eq!(1, server.buffers[1][2739]);
-        assert_eq!(0, server.buffers[1][2740]);
-        assert_eq!(1, server.buffers[1][2744]);
-        assert_eq!(1, server.buffers[1][4107]);
+        // Test channel 1              
+        assert_eq!(1, server._read_buffer(1)[0   ]); // 1st header 
+        assert_eq!(0, server._read_buffer(1)[1   ]);
+        assert_eq!(0, server._read_buffer(1)[2   ]);
+        assert_eq!(3, server._read_buffer(1)[3   ]);        
+        assert_eq!(9, server._read_buffer(1)[4   ]); // 1st payload 
+        assert_eq!(9, server._read_buffer(1)[1369]);       
+        assert_eq!(1, server._read_buffer(1)[1370]); // 2nd header 
+        assert_eq!(1, server._read_buffer(1)[1371]);
+        assert_eq!(0, server._read_buffer(1)[1372]);
+        assert_eq!(3, server._read_buffer(1)[1373]);        
+        assert_eq!(9, server._read_buffer(1)[1374]); // 2nd payload
+        assert_eq!(9, server._read_buffer(1)[2739]);        
+        assert_eq!(1, server._read_buffer(1)[2740]); // 3rd header
+        assert_eq!(2, server._read_buffer(1)[2741]);
+        assert_eq!(0, server._read_buffer(1)[2742]);
+        assert_eq!(3, server._read_buffer(1)[2743]);        
+        assert_eq!(9, server._read_buffer(1)[2744]); // 3rd payload
+        assert_eq!(9, server._read_buffer(1)[4107]);
     }
     
     // TODO: Test that packets are being received correctly
@@ -240,7 +262,7 @@ mod tests {
     #[test]
     fn test_client_new() {
         let client_address = TEST_ADDRESS.to_owned() + ":9001";
-        let client = Client::new(&client_address);
+        let _client = Client::new(&client_address);
     }
 
     #[test]
