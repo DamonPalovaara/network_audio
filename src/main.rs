@@ -1,12 +1,13 @@
-// This started off as the example project at github.com/RustAudio/rust-jack/blob/master/examples/playback_capture.rs
-// This file used for testing/demonstrating the server/client
+// This file is a modified version of the example project found at:
+// github.com/RustAudio/rust-jack/blob/master/examples/playback_capture.rs
+// This file is used for live demoing the server/client
 
 extern crate jack;
 use std::io;
 
-mod backend;
+mod server;
 
-use backend::Server;
+use server::Server;
 
 fn main() {
     // Create client

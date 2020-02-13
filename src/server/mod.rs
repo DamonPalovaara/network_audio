@@ -1,9 +1,7 @@
+use std::net::UdpSocket;
+
 #[cfg(test)]
 static TEST_ADDRESS: &str = "127.0.0.1";
-
-//extern crate jack;
-use std::net::UdpSocket;
-use std::thread;
 
 pub struct Server {
     _sample_rate:  usize,        // Sample rate of JACK server
@@ -91,56 +89,6 @@ impl Server {
     pub fn _read_buffer(&self, channel_idx: usize) -> &[u8] {
         &self.buffers[channel_idx]
     }
-
-}
-
-struct Client {
-    sample_rate:    usize,
-    key:            usize,
-    jack_buf_size:  usize,
-    payload_size:   usize,
-    server_address: String,
-    server_socket:  UdpSocket,
-}
-
-impl Client {
-    pub fn new(server_address: &str) -> Client { 
-        let sample_rate    = 0;
-        let key            = 0;
-        let jack_buf_size  = 0;
-        let payload_size   = 0;
-        let server_address = server_address.to_string();
-        let server_socket  = UdpSocket::bind(&server_address).unwrap();        
-
-        Client {
-            sample_rate,
-            key,
-            jack_buf_size,
-            payload_size,
-            server_address,
-            server_socket,
-        }
-    }
-
-    pub fn read_packet(&mut self) {
-        let mut buf = vec![0; 2000];
-        self.server_socket.recv_from(&mut buf).unwrap();
-    }
-
-    pub fn prime(&mut self) {
-        let mut buf = vec![0; 2000];
-        let mut read_len;
-        loop {
-            read_len = self.server_socket.recv_from(&mut buf).unwrap().0;
-            if (buf[1] % buf[3]) != buf[3] - 1 || buf[3] == 1 {
-                break;
-            }
-        }
-        self.sample_rate   = buf[2] as usize;
-        self.key           = (256usize / buf[3] as usize) * buf[3] as usize;
-        self.jack_buf_size = 2usize.pow((( ((read_len - 4) * buf[3] as usize) / 4) as f64).log2().floor() as u32);
-        self.payload_size  = read_len - 4;
-    }
 }
 
 // Casts a f32 slice as a u8 slice
@@ -150,11 +98,9 @@ fn f32_slice_to_bytes(jack_buf: &[f32]) -> &[u8] {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    
+    use super::*;    
 
     #[test]
     fn test_server_new() {
@@ -242,81 +188,5 @@ mod tests {
         assert_eq!(3, server._read_buffer(1)[2743]);        
         assert_eq!(9, server._read_buffer(1)[2744]); // 3rd payload
         assert_eq!(9, server._read_buffer(1)[4107]);
-    }
-    
-    // TODO: Test that packets are being received correctly
-    #[test]
-    fn test_server_send_packets() {
-        // Create server
-        let jack_buf_size  = 1024;
-        let _sample_rate   = 44100;
-        let _num_channels  = 2;
-        let network_mtu    = 1500;
-        let server_address = TEST_ADDRESS.to_owned() + ":8002";
-        let send_address   = TEST_ADDRESS.to_owned() + ":9001";
-        let mut server = Server::new(
-            jack_buf_size, 
-            _sample_rate, 
-            _num_channels,
-            network_mtu,
-            &server_address,
-            &send_address
-        );
-
-        // Fill buffers
-        let one = f32::from_be_bytes([1, 1, 1, 1]);
-        let jack_buffer = vec![one; jack_buf_size]; 
-        server.fill_buffer(&jack_buffer, 0);
-        server.fill_buffer(&jack_buffer, 1);
-
-        // Send packets
-        server.send_packets();
-    }
-
-    #[test]
-    fn test_client_new() {
-        let client_address = TEST_ADDRESS.to_owned() + ":9001";
-        let _client = Client::new(&client_address);
-    }
-
-    #[test]
-    fn test_client_prime() {
-        // Create client
-        let server_address = TEST_ADDRESS.to_owned() + ":9002";
-        let mut client = Client::new(&server_address);
-
-        // Create server on separate thread
-        thread::spawn(|| {
-            // Create server
-            let jack_buf_size  = 1024;
-            let _sample_rate   = 44100;
-            let _num_channels  = 2;
-            let network_mtu    = 1500;
-            let server_address = TEST_ADDRESS.to_owned() + ":8003";
-            let send_address   = TEST_ADDRESS.to_owned() + ":9002";
-            let mut server = Server::new(
-                jack_buf_size, 
-                _sample_rate, 
-                _num_channels,
-                network_mtu,
-                &server_address,
-                &send_address
-            );
-            // Fill server buffers
-            let ones = f32::from_be_bytes([1, 1, 1, 1]);
-            let jack_buffer = vec![ones; jack_buf_size]; 
-            server.fill_buffer(&jack_buffer, 0);
-            server.fill_buffer(&jack_buffer, 1);
-
-            // Send packets
-            loop { server.send_packets(); }
-        });   
-
-        client.prime();
-
-        assert_eq!(client.sample_rate, 0);
-        assert_eq!(client.key, 255);
-        assert_eq!(client.jack_buf_size, 1024);
-        assert_eq!(client.payload_size, 1366);
     }
 }
