@@ -4,18 +4,22 @@
 
 extern crate jack;
 use std::io;
+use std::thread;
 
 mod server;
+mod client;
 
 use server::Server;
+use client::Client;
 
 fn main() {
     // Create client
     let (client, _status) = jack::Client::new("Network Audio", jack::ClientOptions::NO_START_SERVER).unwrap();
 
     // Register ports
-    let in_a = client.register_port("Net_L", jack::AudioIn::default()).unwrap();
-    let in_b = client.register_port("Net_R", jack::AudioIn::default()).unwrap();
+    let in_0 = client.register_port("net_in_0", jack::AudioIn::default()).unwrap();
+
+    let out_0 = client.register_port("net_out_0", jack::AudioOut::default()).unwrap();
     
     // Create server
     let jack_buf_size  = 1024;
@@ -24,7 +28,7 @@ fn main() {
     let network_mtu    = 1500;
     let server_address = "192.168.8.13:8000";
     let send_address   = "192.168.8.13:9001";
-    let mut server = Server::new(
+    let mut network_server = Server::new(
         jack_buf_size, 
         sample_rate, 
         num_channels,
@@ -33,19 +37,32 @@ fn main() {
         send_address
     );
 
-    // Jack function which is executed in async
-    let process_callback = move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
+    let nines = f32::from_be_bytes([9, 9, 9, 9]);
+    let jack_buffer = vec![nines; jack_buf_size];
+    network_server.fill_buffer(&jack_buffer, 0); 
+    network_server.fill_buffer(&jack_buffer, 1);
 
-        server.fill_buffer(in_a.as_slice(ps), 0);
-        server.fill_buffer(in_b.as_slice(ps), 1);
-        server.send_packets();
+    let mut net_client = Client::new("192.168.8.13:9001");
+    network_server.send_packets();
+    let packet_info = net_client.fetch_packet_info();
+    net_client.prime(packet_info.0, packet_info.1, packet_info.2);
+
+    // Jack function which is executed in async
+    let process_callback_server = move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
+
+        network_server.fill_buffer(in_0.as_slice(ps), 0);
+        network_server.send_packets();
 
         jack::Control::Continue
     };
 
     // Activate the client, which starts the processing.
-    let process = jack::ClosureProcessHandler::new(process_callback);    
+    let process = jack::ClosureProcessHandler::new(process_callback_server);    
     let active_client = client.activate_async(Notifications, process).unwrap();
+
+    while(true) {
+        net_client.read_packet();
+    }
 
     // Wait for user input to quit
     let mut user_input = String::new();
