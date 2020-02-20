@@ -1,4 +1,6 @@
 use std::net::UdpSocket;
+use std::thread;
+use std::slice;
 
 #[cfg(test)]
 static TEST_ADDRESS: &str = "127.0.0.1";
@@ -12,8 +14,6 @@ pub struct Client {
     audio_buf_size: usize,
     payload_size:   usize,
     server_address: String,
-    server_socket:  UdpSocket,
-    packet_buffer:  Vec<u8>,
     buffer:         Vec<Vec<u8>>,
     row_count:      Vec<usize>,
 }
@@ -26,8 +26,6 @@ impl Client {
         let audio_buf_size = 0;
         let payload_size   = 0;
         let server_address = server_address.to_string();
-        let server_socket  = UdpSocket::bind(&server_address).unwrap();        
-        let packet_buffer  = Vec::new();
         let buffer         = Vec::new();
         let row_count      = Vec::new();
 
@@ -38,22 +36,20 @@ impl Client {
             audio_buf_size,
             payload_size,
             server_address,
-            server_socket,
-            packet_buffer,
             buffer,
             row_count
         }
     }
 
-    pub fn read_packet(&mut self) {
-        let read_len    = self.server_socket.recv_from(&mut self.packet_buffer).unwrap().0;
-        let encoded_idx = self.packet_buffer[1] as usize;
-        let num_chunks  = self.packet_buffer[3] as usize;
-        let row         = encoded_idx / num_chunks;
-        let row_idx     = encoded_idx % num_chunks;
-        let buf_idx     = (row * self.audio_buf_size * 4) + (self.payload_size * row_idx);
-        self.buffer[0][buf_idx..buf_idx + read_len].copy_from_slice(&self.packet_buffer[..read_len]);
-    }
+    // pub fn read_packet(&mut self) {
+    //     let read_len    = self.server_socket.recv_from(&mut self.packet_buffer).unwrap().0;
+    //     let encoded_idx = self.packet_buffer[1] as usize;
+    //     let num_chunks  = self.packet_buffer[3] as usize;
+    //     let row         = encoded_idx / num_chunks;
+    //     let row_idx     = encoded_idx % num_chunks;
+    //     let buf_idx     = (row * self.audio_buf_size * 4) + (self.payload_size * row_idx);
+    //     self.buffer[0][buf_idx..buf_idx + read_len].copy_from_slice(&self.packet_buffer[..read_len]);
+    // }
 
     pub fn get_next_row(&mut self, channel_num: usize) -> &[u8] {
         let start_idx = self.audio_buf_size * self.row_count[channel_num];
@@ -62,11 +58,13 @@ impl Client {
         &self.buffer[0][start_idx..end_idx]
     }
 
+    // To be removed
     pub fn fetch_packet_info(&self) -> (usize, usize, u8) {
+        let socket = UdpSocket::bind(&self.server_address).unwrap();
         let mut buf = vec![0; MAX_PAYLOAD];
         let mut read_len;
         loop {
-            read_len = self.server_socket.recv_from(&mut buf).unwrap().0;
+            read_len = socket.recv_from(&mut buf).unwrap().0;
             // If not last packet (unless only one packet per buffer)
             if (buf[1] % buf[3]) != buf[3] - 1 || buf[3] == 1 {
                 break;
@@ -81,10 +79,34 @@ impl Client {
         self.rows = self.key / num_chunks;
         self.audio_buf_size = 2usize.pow(((payload_size * num_chunks) as f64).log2().floor() as u32 - 2);
         self.payload_size = payload_size;
-        self.packet_buffer = vec![0; self.payload_size + 4];
         let buffer_size = (self.key / num_chunks) * (self.audio_buf_size * 4);
         self.buffer = vec![vec![0; buffer_size]; 1];
         self.row_count = vec![0; 1];
+    }
+
+    pub fn spawn_packet_reader(&mut self) {
+        let socket            = UdpSocket::bind(&self.server_address).unwrap();
+        let mut packet_buffer = vec![0; self.payload_size + 4];
+        let buffer_pointer    = &mut self.buffer[0][0] as *mut u8;
+        let audio_buf_bytes   = self.audio_buf_size * 4;
+        let payload_bytes     = self.payload_size;
+        let mut raw_buffer    = unsafe { slice::from_raw_parts_mut(&mut *buffer_pointer, self.buffer[0].len()) };
+        
+        thread::spawn(move||{
+            let mut read_len = 0;
+            let mut row      = 0;
+            let mut column   = 0;
+            let mut index    = 0;
+            let mut range    = 0..0;
+            while true {
+                let read_len = socket.recv_from(&mut packet_buffer).unwrap().0;
+                row          = (packet_buffer[1] / packet_buffer[3]) as usize;
+                column       = (packet_buffer[1] % packet_buffer[3]) as usize;
+                index        = (row * audio_buf_bytes) + (column * payload_bytes);
+                range        = index..(index + read_len);
+                raw_buffer[range].copy_from_slice(&packet_buffer[0..read_len]);
+            }
+        });
     }
 
     pub fn get_sample_rate(&self) -> usize {
@@ -113,7 +135,6 @@ mod tests {
         assert_eq!(client.rows, 64);
         assert_eq!(client.audio_buf_size, 1024);
         assert_eq!(client.payload_size, 1366);
-        assert_eq!(client.packet_buffer.len(), 1370);
         assert_eq!(client.buffer[0].len(), 262144);
     }
 }

@@ -32,7 +32,7 @@ impl Server {
         let udp_socket   = UdpSocket::bind(server_address).unwrap();
         let send_address = send_address.to_string();
         let count        = vec![0; _num_channels];
-        let key          = (256 / num_bufs) * num_bufs;
+        let key          = num_bufs * 2usize.pow(8 - (num_bufs as f64).log2().ceil() as u32);
 
         Server {
             _sample_rate,
@@ -122,7 +122,7 @@ mod tests {
 
         assert_eq!(server.payload_size, 1370);
         assert_eq!(server.buffers[0].len(), 4108);
-        assert_eq!(server.key, 255);
+        assert_eq!(server.key, 192);
     }
 
     #[test]

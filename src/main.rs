@@ -7,10 +7,8 @@ use std::io;
 use std::thread;
 
 mod server;
-mod client;
 
 use server::Server;
-use client::Client;
 
 fn main() {
     // Create client
@@ -42,11 +40,6 @@ fn main() {
     network_server.fill_buffer(&jack_buffer, 0); 
     network_server.fill_buffer(&jack_buffer, 1);
 
-    let mut net_client = Client::new("192.168.8.13:9001");
-    network_server.send_packets();
-    let packet_info = net_client.fetch_packet_info();
-    net_client.prime(packet_info.0, packet_info.1, packet_info.2);
-
     // Jack function which is executed in async
     let process_callback_server = move |_: &jack::Client, ps: &jack::ProcessScope| -> jack::Control {
 
@@ -59,10 +52,6 @@ fn main() {
     // Activate the client, which starts the processing.
     let process = jack::ClosureProcessHandler::new(process_callback_server);    
     let active_client = client.activate_async(Notifications, process).unwrap();
-
-    while(true) {
-        net_client.read_packet();
-    }
 
     // Wait for user input to quit
     let mut user_input = String::new();
